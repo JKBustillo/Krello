@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Krello · tablero de proyectos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#141019;
+    --grid:rgba(255,255,255,.028);
+    --surface:#1d1826;
+    --surface-2:#241e31;
+    --line:rgba(255,255,255,.08);
+    --line-strong:rgba(255,255,255,.22);
+    --ink:#efe9f5;
+    --muted:#948ba6;
+    --done:#47e0a0;
+    --danger:#ff6b6b;
+    --radius:16px;
+    --display:'Bricolage Grotesque', system-ui, sans-serif;
+    --body:system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono:'Space Mono', ui-monospace, monospace;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    min-height:100vh;
+    color:var(--ink);
+    font-family:var(--body);
+    line-height:1.5;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/26px 26px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/26px 26px,
+      radial-gradient(120% 90% at 15% -10%, #211830, var(--bg) 55%);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .wrap{max-width:1280px; margin:0 auto; padding:clamp(24px,5vw,56px) clamp(18px,4vw,40px) 80px}
+
+  /* ---- topbar / hero ---- */
+  .topbar{
+    display:flex; flex-wrap:wrap; gap:28px 40px;
+    align-items:flex-end; justify-content:space-between;
+    padding-bottom:28px; margin-bottom:36px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand h1{
+    font-family:var(--display);
+    font-weight:800; font-size:clamp(2.6rem,7vw,4.4rem);
+    letter-spacing:-.03em; line-height:.92; margin:0;
+  }
+  .brand h1 .dot{color:var(--done)}
+  .brand .tag{
+    margin:.7rem 0 0; max-width:34ch;
+    color:var(--muted); font-size:1rem;
+  }
+  .stats{display:flex; gap:10px; margin:0}
+  .stat{
+    font-family:var(--mono);
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:12px; padding:10px 16px; text-align:center; min-width:78px;
+  }
+  .stat b{display:block; font-size:1.7rem; font-weight:700; letter-spacing:-.02em}
+  .stat span{display:block; font-size:.66rem; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-top:2px}
+
+  /* ---- board grid ---- */
+  .board{
+    display:grid; gap:20px;
+    grid-template-columns:repeat(auto-fill, minmax(292px,1fr));
+    align-items:start;
+  }
+
+  /* ---- project card ---- */
+  .card{
+    display:flex; overflow:hidden;
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius);
+    transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .card:hover{
+    transform:translateY(-2px);
+    border-color:var(--line-strong);
+    box-shadow:0 18px 40px -24px rgba(0,0,0,.8);
+  }
+  /* signature: vertical progress rail, fills bottom→top with the project accent */
+  .rail{position:relative; flex:none; width:6px; background:rgba(255,255,255,.06)}
+  .rail-fill{
+    position:absolute; left:0; right:0; bottom:0;
+    background:var(--accent); border-radius:0 0 0 6px;
+    transition:height .4s cubic-bezier(.4,0,.2,1);
+  }
+  .card-body{flex:1; min-width:0; padding:16px 16px 14px; display:flex; flex-direction:column; gap:12px}
+
+  .card-head{display:flex; align-items:flex-start; gap:10px}
+  .proj-title{
+    flex:1; min-width:0; margin:0;
+    font-family:var(--display); font-weight:700; font-size:1.2rem;
+    letter-spacing:-.015em; word-break:break-word;
+    outline:none; border-radius:6px;
+  }
+  .proj-title:focus{box-shadow:0 0 0 2px var(--accent); padding:0 4px; margin:0 -4px}
+  .head-meta{display:flex; align-items:center; gap:6px; flex:none}
+  .count{font-family:var(--mono); font-size:.8rem; color:var(--muted); letter-spacing:.04em}
+
+  .icon-btn{
+    display:grid; place-items:center;
+    width:26px; height:26px; padding:0;
+    background:none; border:none; border-radius:8px;
+    color:var(--muted); font-size:.85rem; cursor:pointer;
+    transition:.15s;
+  }
+  .icon-btn:hover{background:rgba(255,107,107,.12); color:var(--danger)}
+  .del-project{opacity:0}
+  .card:hover .del-project, .del-project:focus-visible{opacity:1}
+
+  /* ---- tasks ---- */
+  .tasks{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px}
+  .task{
+    display:flex; align-items:center; gap:6px;
+    padding:5px 6px; border-radius:9px;
+    transition:background .15s;
+  }
+  .task:hover{background:var(--surface-2)}
+  .task.is-new{animation:pop .25s ease}
+  @keyframes pop{from{opacity:0; transform:translateY(-4px)}}
+
+  .check{display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer}
+  .check input{position:absolute; opacity:0; width:0; height:0}
+  .box{
+    flex:none; width:18px; height:18px;
+    border:2px solid var(--line-strong); border-radius:6px;
+    display:grid; place-items:center; transition:.18s;
+  }
+  .box::after{content:"✓"; font-size:12px; font-weight:700; color:#141019; opacity:0; transform:scale(.4); transition:.18s}
+  .check input:checked ~ .box{background:var(--done); border-color:var(--done)}
+  .check input:checked ~ .box::after{opacity:1; transform:scale(1)}
+  .check input:focus-visible ~ .box{box-shadow:0 0 0 3px rgba(71,224,160,.35)}
+  .text{min-width:0; word-break:break-word; transition:.18s}
+  .task.is-done .text{color:var(--muted); text-decoration:line-through}
+
+  .task-del{opacity:0; flex:none}
+  .task:hover .task-del, .task-del:focus-visible{opacity:1}
+
+  .add-task{display:flex; margin-top:2px}
+  .add-input{
+    flex:1; width:100%;
+    background:none; border:none; border-bottom:1px solid transparent;
+    color:var(--ink); font:inherit; padding:6px 6px;
+    transition:border-color .18s;
+  }
+  .add-input::placeholder{color:var(--muted)}
+  .add-input:focus{outline:none; border-bottom-color:var(--accent)}
+
+  /* ---- ghost / new project ---- */
+  .ghost{
+    flex-direction:column; justify-content:center; align-items:center; gap:8px;
+    min-height:132px; padding:24px;
+    background:transparent; border:1.5px dashed var(--line-strong);
+    color:var(--muted); text-align:center; cursor:text;
+  }
+  .ghost:hover{border-color:var(--done); color:var(--ink); transform:translateY(-2px)}
+  .ghost-plus{font-family:var(--display); font-size:1.8rem; line-height:1; color:var(--done)}
+  .ghost-input{
+    width:100%; text-align:center;
+    background:none; border:none; color:var(--ink);
+    font-family:var(--display); font-weight:600; font-size:1.05rem;
+  }
+  .ghost-input::placeholder{color:var(--muted); font-weight:600}
+  .ghost-input:focus{outline:none}
+  .ghost-hint{font-family:var(--mono); font-size:.66rem; letter-spacing:.14em; text-transform:uppercase}
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important; animation:none !important}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Krello<span class="dot">.</span></h1>
+        <p class="tag">Tu tablero de proyectos. Suelta las ideas aquí antes de que se te olviden.</p>
+      </div>
+      <dl class="stats">
+        <div class="stat"><b class="stat-proj">00</b><span>proyectos</span></div>
+        <div class="stat"><b class="stat-task">00</b><span>tareas</span></div>
+        <div class="stat"><b class="stat-done">00</b><span>hechas</span></div>
+      </dl>
+    </header>
+    <main id="board" class="board"></main>
+  </div>
+
+<script>
+  const KEY = 'krello.v1';
+  const ACCENTS = ['#ff6b4a','#ffb23e','#47e0a0','#56c2ff','#b57bff','#ff7da8'];
+  const board = document.getElementById('board');
+
+  let state = load();
+
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch{ return []; } }
+  function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+  function uid(){ return crypto.randomUUID(); }
+  function find(id){ return state.find(p => p.id === id); }
+  function esc(s){ return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function pad(n){ return String(n).padStart(2,'0'); }
+
+  function stats(p){
+    const total = p.tasks.length;
+    const done = p.tasks.filter(t => t.done).length;
+    return { total, done, pct: total ? Math.round(done/total*100) : 0 };
+  }
+
+  const ghostHTML = `
+    <form class="card ghost" id="new-project">
+      <span class="ghost-plus" aria-hidden="true">+</span>
+      <input class="ghost-input" type="text" placeholder="Nuevo proyecto…" autocomplete="off" aria-label="Nombre del proyecto">
+      <span class="ghost-hint">Enter para crear</span>
+    </form>`;
+
+  function taskLi(pid, t, isNew){
+    return `<li class="task ${t.done ? 'is-done' : ''} ${isNew ? 'is-new' : ''}" data-task="${t.id}">
+      <label class="check">
+        <input type="checkbox" ${t.done ? 'checked' : ''} data-act="toggle" data-project="${pid}" data-task="${t.id}">
+        <span class="box" aria-hidden="true"></span>
+        <span class="text">${esc(t.text)}</span>
+      </label>
+      <button type="button" class="icon-btn task-del" data-act="del-task" data-project="${pid}" data-task="${t.id}" aria-label="Eliminar tarea">✕</button>
+    </li>`;
+  }
+
+  function cardHTML(p){
+    const s = stats(p);
+    return `<article class="card" style="--accent:${p.accent}" data-project="${p.id}">
+      <div class="rail"><span class="rail-fill" style="height:${s.pct}%"></span></div>
+      <div class="card-body">
+        <div class="card-head">
+          <h2 class="proj-title" contenteditable="true" spellcheck="false" data-project="${p.id}">${esc(p.name)}</h2>
+          <div class="head-meta">
+            <span class="count">${s.done}/${s.total}</span>
+            <button type="button" class="icon-btn del-project" data-act="del-project" data-project="${p.id}" aria-label="Eliminar proyecto">✕</button>
+          </div>
+        </div>
+        <ul class="tasks">${p.tasks.map(t => taskLi(p.id, t, false)).join('')}</ul>
+        <form class="add-task" data-project="${p.id}">
+          <input class="add-input" type="text" placeholder="¿Qué hay que hacer?" autocomplete="off" aria-label="Nueva tarea">
+        </form>
+      </div>
+    </article>`;
+  }
+
+  function render(){
+    board.innerHTML = state.map(cardHTML).join('') + ghostHTML;
+    updateHeaderStats();
+  }
+
+  function updateMeta(p){
+    const card = board.querySelector(`.card[data-project="${p.id}"]`);
+    if(!card) return;
+    const s = stats(p);
+    card.querySelector('.count').textContent = `${s.done}/${s.total}`;
+    card.querySelector('.rail-fill').style.height = s.pct + '%';
+    updateHeaderStats();
+  }
+
+  function updateHeaderStats(){
+    const tasks = state.reduce((n,p) => n + p.tasks.length, 0);
+    const done = state.reduce((n,p) => n + p.tasks.filter(t => t.done).length, 0);
+    document.querySelector('.stat-proj').textContent = pad(state.length);
+    document.querySelector('.stat-task').textContent = pad(tasks);
+    document.querySelector('.stat-done').textContent = pad(done);
+  }
+
+  // ---- events (delegated on the board, survives re-render) ----
+  board.addEventListener('submit', e => {
+    e.preventDefault();
+    if(e.target.id === 'new-project'){
+      const input = e.target.querySelector('.ghost-input');
+      const name = input.value.trim();
+      if(!name) return;
+      state.push({ id: uid(), name, accent: ACCENTS[state.length % ACCENTS.length], tasks: [] });
+      save(); render();
+      document.querySelector('#new-project .ghost-input')?.focus();
+      return;
+    }
+    if(e.target.classList.contains('add-task')){
+      const p = find(e.target.dataset.project);
+      const input = e.target.querySelector('.add-input');
+      const text = input.value.trim();
+      if(!text) return;
+      const t = { id: uid(), text, done: false };
+      p.tasks.push(t); save();
+      e.target.closest('.card-body').querySelector('.tasks')
+        .insertAdjacentHTML('beforeend', taskLi(p.id, t, true));
+      updateMeta(p);
+      input.value = ''; input.focus();
+    }
+  });
+
+  board.addEventListener('change', e => {
+    const cb = e.target.closest('[data-act="toggle"]');
+    if(!cb) return;
+    const p = find(cb.dataset.project);
+    const t = p.tasks.find(x => x.id === cb.dataset.task);
+    t.done = cb.checked; save();
+    cb.closest('.task').classList.toggle('is-done', t.done);
+    updateMeta(p);
+  });
+
+  board.addEventListener('click', e => {
+    const btn = e.target.closest('[data-act]');
+    if(!btn) return;
+    if(btn.dataset.act === 'del-task'){
+      const p = find(btn.dataset.project);
+      p.tasks = p.tasks.filter(t => t.id !== btn.dataset.task);
+      save(); btn.closest('.task').remove(); updateMeta(p);
+    }
+    if(btn.dataset.act === 'del-project'){
+      const p = find(btn.dataset.project);
+      if(p.tasks.length && !confirm(`¿Eliminar “${p.name}” y sus ${p.tasks.length} tareas?`)) return;
+      state = state.filter(x => x.id !== p.id);
+      save(); render();
+    }
+  });
+
+  // rename project (contenteditable title)
+  board.addEventListener('keydown', e => {
+    if(e.target.classList.contains('proj-title') && e.key === 'Enter'){
+      e.preventDefault(); e.target.blur();
+    }
+  });
+  board.addEventListener('focusout', e => {
+    if(!e.target.classList.contains('proj-title')) return;
+    const p = find(e.target.dataset.project);
+    let name = e.target.textContent.trim();
+    if(!name){ name = 'Sin título'; e.target.textContent = name; }
+    p.name = name; save();
+  });
+
+  // ponytail: full re-render only on add/delete project; task ops patch the DOM
+  function selfTest(){
+    const s = stats({ tasks: [{done:true},{done:false},{done:true}] });
+    console.assert(s.total === 3 && s.done === 2 && s.pct === 67, 'stats() roto', s);
+  }
+  selfTest();
+  render();
+</script>
+</body>
+</html>
