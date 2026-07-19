@@ -118,13 +118,20 @@
   .card:hover .del-project, .del-project:focus-visible{opacity:1}
 
   /* ---- tasks ---- */
-  .tasks{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px}
+  .tasks{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; min-height:6px}
   .task{
     display:flex; align-items:center; gap:6px;
     padding:5px 6px; border-radius:9px;
+    cursor:grab;
     transition:background .15s;
   }
   .task:hover{background:var(--surface-2)}
+  .task.dragging{opacity:.35; cursor:grabbing; background:var(--surface-2)}
+  body.is-dragging .tasks{
+    min-height:34px; border-radius:10px;
+    outline:1.5px dashed var(--line); outline-offset:5px;
+  }
+  body.is-dragging .task{cursor:grabbing}
   .task.is-new{animation:pop .25s ease}
   @keyframes pop{from{opacity:0; transform:translateY(-4px)}}
 
@@ -221,16 +228,19 @@
       <span class="ghost-hint">Enter para crear</span>
     </form>`;
 
-  function taskLi(pid, t, isNew){
-    return `<li class="task ${t.done ? 'is-done' : ''} ${isNew ? 'is-new' : ''}" data-task="${t.id}">
+  function taskLi(t, isNew){
+    return `<li class="task ${t.done ? 'is-done' : ''} ${isNew ? 'is-new' : ''}" data-task="${t.id}" draggable="true">
       <label class="check">
-        <input type="checkbox" ${t.done ? 'checked' : ''} data-act="toggle" data-project="${pid}" data-task="${t.id}">
+        <input type="checkbox" ${t.done ? 'checked' : ''} data-act="toggle">
         <span class="box" aria-hidden="true"></span>
         <span class="text">${esc(t.text)}</span>
       </label>
-      <button type="button" class="icon-btn task-del" data-act="del-task" data-project="${pid}" data-task="${t.id}" aria-label="Eliminar tarea">✕</button>
+      <button type="button" class="icon-btn task-del" data-act="del-task" aria-label="Eliminar tarea">✕</button>
     </li>`;
   }
+
+  // a task's owner is wherever it currently sits in the DOM, not a baked-in id
+  function ownerOf(el){ return find(el.closest('.card').dataset.project); }
 
   function cardHTML(p){
     const s = stats(p);
@@ -244,7 +254,7 @@
             <button type="button" class="icon-btn del-project" data-act="del-project" data-project="${p.id}" aria-label="Eliminar proyecto">✕</button>
           </div>
         </div>
-        <ul class="tasks">${p.tasks.map(t => taskLi(p.id, t, false)).join('')}</ul>
+        <ul class="tasks">${p.tasks.map(t => taskLi(t, false)).join('')}</ul>
         <form class="add-task" data-project="${p.id}">
           <input class="add-input" type="text" placeholder="¿Qué hay que hacer?" autocomplete="off" aria-label="Nueva tarea">
         </form>
@@ -294,7 +304,7 @@
       const t = { id: uid(), text, done: false };
       p.tasks.push(t); save();
       e.target.closest('.card-body').querySelector('.tasks')
-        .insertAdjacentHTML('beforeend', taskLi(p.id, t, true));
+        .insertAdjacentHTML('beforeend', taskLi(t, true));
       updateMeta(p);
       input.value = ''; input.focus();
     }
@@ -303,10 +313,11 @@
   board.addEventListener('change', e => {
     const cb = e.target.closest('[data-act="toggle"]');
     if(!cb) return;
-    const p = find(cb.dataset.project);
-    const t = p.tasks.find(x => x.id === cb.dataset.task);
+    const li = cb.closest('.task');
+    const p = ownerOf(li);
+    const t = p.tasks.find(x => x.id === li.dataset.task);
     t.done = cb.checked; save();
-    cb.closest('.task').classList.toggle('is-done', t.done);
+    li.classList.toggle('is-done', t.done);
     updateMeta(p);
   });
 
@@ -314,9 +325,10 @@
     const btn = e.target.closest('[data-act]');
     if(!btn) return;
     if(btn.dataset.act === 'del-task'){
-      const p = find(btn.dataset.project);
-      p.tasks = p.tasks.filter(t => t.id !== btn.dataset.task);
-      save(); btn.closest('.task').remove(); updateMeta(p);
+      const li = btn.closest('.task');
+      const p = ownerOf(li);
+      p.tasks = p.tasks.filter(t => t.id !== li.dataset.task);
+      save(); li.remove(); updateMeta(p);
     }
     if(btn.dataset.act === 'del-project'){
       const p = find(btn.dataset.project);
@@ -339,6 +351,63 @@
     if(!name){ name = 'Sin título'; e.target.textContent = name; }
     p.name = name; save();
   });
+
+  // ---- drag & drop: reorder tasks, or move them between projects ----
+  // ponytail: native HTML5 DnD, no library. Mouse only — touch has no dragstart.
+  let dragged = null;
+
+  board.addEventListener('dragstart', e => {
+    const li = e.target.closest('.task');
+    if(!li) return;
+    dragged = li;
+    li.classList.add('dragging');
+    document.body.classList.add('is-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', li.dataset.task); // Firefox needs payload
+  });
+
+  board.addEventListener('dragover', e => {
+    if(!dragged) return;
+    const card = e.target.closest('.card[data-project]');
+    if(!card) return;
+    e.preventDefault();
+    const ul = card.querySelector('.tasks');
+    ul.insertBefore(dragged, dropTarget(ul, e.clientY));
+  });
+
+  board.addEventListener('drop', e => { if(dragged) e.preventDefault(); });
+
+  board.addEventListener('dragend', () => {
+    if(!dragged) return;
+    dragged.classList.remove('dragging');
+    document.body.classList.remove('is-dragging');
+    dragged = null;
+    commitOrder();
+  });
+
+  // the first task whose midpoint sits below the cursor; null means "append"
+  function dropTarget(ul, y){
+    return [...ul.querySelectorAll('.task:not(.dragging)')]
+      .find(el => { const b = el.getBoundingClientRect(); return y < b.top + b.height/2; }) || null;
+  }
+
+  // rebuild every project's task list from the DOM, but only keep it if nothing was lost
+  function commitOrder(){
+    const all = new Map();
+    state.forEach(p => p.tasks.forEach(t => all.set(t.id, t)));
+    const next = state.map(p => {
+      const ul = board.querySelector(`.card[data-project="${p.id}"] .tasks`);
+      return ul ? [...ul.children].map(li => all.get(li.dataset.task)).filter(Boolean) : p.tasks;
+    });
+    if(next.reduce((n, ts) => n + ts.length, 0) !== all.size){
+      console.error('drag: task count mismatch, discarding move');
+      render();
+      return;
+    }
+    state.forEach((p, i) => { p.tasks = next[i]; });
+    save();
+    state.forEach(updateMeta);
+  }
 
   // ponytail: full re-render only on add/delete project; task ops patch the DOM
   function selfTest(){
