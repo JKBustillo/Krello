@@ -180,6 +180,35 @@
   .ghost-input:focus{outline:none}
   .ghost-hint{font-family:var(--mono); font-size:.66rem; letter-spacing:.14em; text-transform:uppercase}
 
+  /* ---- copy / paste the board ---- */
+  .io{margin-top:56px; padding-top:22px; border-top:1px solid var(--line)}
+  .io summary{
+    font-family:var(--mono); font-size:.7rem; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--muted); cursor:pointer; width:fit-content; padding:4px 2px; border-radius:6px;
+  }
+  .io summary:hover{color:var(--ink)}
+  .io[open] summary{margin-bottom:14px; color:var(--ink)}
+  .io-help{max-width:62ch; margin:0 0 12px; color:var(--muted); font-size:.9rem}
+  .io-code{
+    display:block; width:100%; min-height:132px; resize:vertical;
+    padding:12px 14px; border-radius:12px;
+    background:var(--surface); border:1px solid var(--line); color:var(--ink);
+    font-family:var(--mono); font-size:.78rem; line-height:1.6;
+  }
+  .io-code:focus{outline:none; border-color:var(--line-strong)}
+  .io-actions{display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap}
+  .btn{
+    font-family:var(--mono); font-size:.74rem; letter-spacing:.1em; text-transform:uppercase;
+    padding:9px 16px; border-radius:10px; cursor:pointer;
+    background:none; border:1px solid var(--line-strong); color:var(--ink);
+    transition:.15s;
+  }
+  .btn:hover{border-color:var(--ink)}
+  .btn-primary{background:var(--ink); border-color:var(--ink); color:#141019; font-weight:700}
+  .btn-primary:hover{background:#fff; border-color:#fff}
+  .io-status{font-family:var(--mono); font-size:.74rem; color:var(--muted)}
+  .io-status.is-bad{color:var(--danger)}
+
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important; animation:none !important}
   }
@@ -199,6 +228,19 @@
       </dl>
     </header>
     <main id="board" class="board"></main>
+
+    <footer>
+      <details class="io" id="io">
+        <summary>Copiar o pegar tablero</summary>
+        <p class="io-help">Tu tablero entero, en texto. Cópialo para guardarlo o llevártelo a otro navegador. Pega uno encima y dale Importar para reemplazar lo que tienes aquí.</p>
+        <textarea class="io-code" id="io-code" spellcheck="false" autocomplete="off" aria-label="Código del tablero"></textarea>
+        <div class="io-actions">
+          <button type="button" class="btn" id="io-copy">Copiar</button>
+          <button type="button" class="btn btn-primary" id="io-import">Importar</button>
+          <span class="io-status" id="io-status" role="status"></span>
+        </div>
+      </details>
+    </footer>
   </div>
 
 <script>
@@ -409,10 +451,80 @@
     state.forEach(updateMeta);
   }
 
+  // ---- copy / paste the board ----
+  // ponytail: plain one-line JSON, no encoding layer. Add one if it ever gets mangled in transit.
+  const io = document.getElementById('io');
+  const ioCode = document.getElementById('io-code');
+  const ioStatus = document.getElementById('io-status');
+
+  // accept anything project-shaped: hand-written codes and older exports both work
+  function normalize(raw){
+    if(!Array.isArray(raw)) throw new Error('el código tiene que ser una lista de proyectos');
+    if(raw.some(p => !p || typeof p !== 'object' || Array.isArray(p)))
+      throw new Error('hay elementos que no son proyectos');
+    return raw.map((p, i) => ({
+      id: p.id || uid(),
+      name: String(p.name ?? 'Sin título').trim() || 'Sin título',
+      accent: p.accent || ACCENTS[i % ACCENTS.length],
+      tasks: (Array.isArray(p.tasks) ? p.tasks : [])
+        .map(t => ({ id: t.id || uid(), text: String(t.text ?? '').trim(), done: !!t.done }))
+        .filter(t => t.text),
+    }));
+  }
+
+  function say(msg, bad){
+    ioStatus.textContent = msg;
+    ioStatus.classList.toggle('is-bad', !!bad);
+  }
+
+  io.addEventListener('toggle', () => {
+    if(!io.open) return;
+    ioCode.value = JSON.stringify(state);
+    say('');
+  });
+
+  document.getElementById('io-copy').addEventListener('click', async () => {
+    ioCode.select();
+    try{
+      await navigator.clipboard.writeText(ioCode.value);
+      say('Copiado');
+    }catch{
+      say('Seleccionado — dale Ctrl+C');
+    }
+  });
+
+  document.getElementById('io-import').addEventListener('click', () => {
+    let next;
+    try{
+      next = normalize(JSON.parse(ioCode.value));
+    }catch(err){
+      say('No pude leer el código: ' + err.message, true);
+      return;
+    }
+    if(state.length && !confirm(`Importar reemplaza tus ${state.length} proyectos actuales. ¿Seguir?`)) return;
+    state = next;
+    save(); render();
+    ioCode.value = JSON.stringify(state);
+    say(`Importados ${state.length} proyectos`);
+  });
+
   // ponytail: full re-render only on add/delete project; task ops patch the DOM
   function selfTest(){
     const s = stats({ tasks: [{done:true},{done:false},{done:true}] });
     console.assert(s.total === 3 && s.done === 2 && s.pct === 67, 'stats() roto', s);
+
+    const n = normalize([{ name: 'A', tasks: [{ text: 'x', done: 1 }, { text: '  ' }] }, { name: '' }]);
+    console.assert(n.length === 2, 'normalize() pierde proyectos', n);
+    console.assert(n[0].tasks.length === 1 && n[0].tasks[0].done === true, 'normalize() no limpia tareas', n[0]);
+    console.assert(n[1].name === 'Sin título' && n[1].tasks.length === 0, 'normalize() no rellena huecos', n[1]);
+    console.assert(n[0].id && n[0].accent, 'normalize() no asigna id/accent', n[0]);
+
+    let threw = false;
+    try{ normalize('nope'); }catch{ threw = true; }
+    console.assert(threw, 'normalize() debe rechazar lo que no sea una lista');
+
+    const round = normalize(JSON.parse(JSON.stringify(n)));
+    console.assert(JSON.stringify(round) === JSON.stringify(n), 'exportar→importar no es idempotente');
   }
   selfTest();
   render();
