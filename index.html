@@ -106,6 +106,11 @@
     background:none; border:none; border-radius:6px;
     color:var(--muted); font-size:.95rem; line-height:1;
     cursor:grab; opacity:0; transition:opacity .15s, color .15s;
+    touch-action:none; -webkit-touch-callout:none;
+  }
+  /* no hover on touch, so every control that hides until hover has to stay put */
+  @media (hover: none){
+    .grip, .task-del, .del-project{opacity:.55}
   }
   .card:hover .grip, .grip:focus-visible{opacity:1}
   .grip:hover{color:var(--ink)}
@@ -138,6 +143,8 @@
     padding:5px 6px; border-radius:9px;
     cursor:grab;
     transition:background .15s;
+    /* a long press drags the task, so it must not select text or raise the iOS callout */
+    user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
   }
   .task:hover{background:var(--surface-2)}
   .task.dragging{opacity:.35; cursor:grabbing; background:var(--surface-2)}
@@ -500,6 +507,62 @@
 
   board.addEventListener('drop', e => { if(dragged) e.preventDefault(); });
   board.addEventListener('dragend', endDrag);
+
+  // ---- touch: same drag, driven by fingers ----
+  // Touch fires no dragstart, so it gets its own listeners. A grip is a handle already,
+  // so it drags at once; a task needs a long press, otherwise every scroll would drag it.
+  const HOLD = 350, SLOP = 10;
+  let hold = null, touchFrom = null;
+
+  board.addEventListener('touchstart', e => {
+    if(e.touches.length !== 1 || dragged) return;
+    const t = e.touches[0];
+    const grip = e.target.closest('.grip');
+    if(grip){
+      startDrag(grip.closest('.card[data-project]'), 'card');
+      navigator.vibrate?.(8);
+      return;
+    }
+    const li = e.target.closest('.task');
+    if(!li) return;
+    touchFrom = { x: t.clientX, y: t.clientY };
+    hold = setTimeout(() => {
+      hold = null;
+      startDrag(li, 'task');
+      navigator.vibrate?.(8);
+    }, HOLD);
+  }, { passive: true });
+
+  board.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    if(!dragged){
+      // moving before the hold lands means this was a scroll, not a drag
+      if(hold && Math.hypot(t.clientX - touchFrom.x, t.clientY - touchFrom.y) > SLOP){
+        clearTimeout(hold); hold = null;
+      }
+      return;
+    }
+    e.preventDefault(); // the gesture is ours now, so the page stops scrolling under it
+    moveDrag(t.clientX, t.clientY);
+    edgeScroll(t.clientY);
+  }, { passive: false });
+
+  function endTouch(e){
+    clearTimeout(hold); hold = null;
+    if(!dragged) return;
+    e.preventDefault(); // no synthetic click, so dropping a task cannot also tick its checkbox
+    endDrag();
+  }
+  board.addEventListener('touchend', endTouch, { passive: false });
+  board.addEventListener('touchcancel', endTouch);
+
+  // ponytail: only scrolls while the finger keeps moving. Good enough to reach an offscreen
+  // project; make it a rAF loop if holding still at the edge ever needs to scroll too.
+  function edgeScroll(y){
+    const edge = 90;
+    if(y < edge) scrollBy(0, -14);
+    else if(y > innerHeight - edge) scrollBy(0, 14);
+  }
 
   // rebuild the whole board from the DOM, but only keep it if nothing went missing
   function commitOrder(){
