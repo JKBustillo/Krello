@@ -12,6 +12,7 @@ One `index.html`. No backend, no build step, no dependencies — open the file a
 - **New task** — type in the project's field, press Enter. Focus stays put, so you can add several in a row.
 - **Rename a project** — click its title.
 - **Reorder or move tasks** — drag them within a project or across to another one.
+- **Reorder projects** — drag a card by the grip next to its title. With the grip focused, the arrow keys move it too.
 - **Move your board** — the panel at the bottom holds the whole board as one line of text. Copy it to back it up, paste one in to restore it.
 
 ## Where your tasks live
@@ -20,7 +21,7 @@ In `localStorage`, which is scoped per origin. The hosted board and a local copy
 
 ## Notes
 
-- Drag and drop uses the native HTML5 API, so it needs a mouse. Touch devices can add, check off and delete tasks, but not drag.
+- On touch, press and hold a task to pick it up; a project's grip drags straight away. The board scrolls when you drag a task near the top or bottom edge.
 - Importing replaces the current board rather than merging, and asks first.
 - Task order, project order and completion state are all saved as you go.
 
