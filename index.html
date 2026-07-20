@@ -98,7 +98,18 @@
   }
   .card-body{flex:1; min-width:0; padding:16px 16px 14px; display:flex; flex-direction:column; gap:12px}
 
-  .card-head{display:flex; align-items:flex-start; gap:10px}
+  .card.dragging{opacity:.45; box-shadow:none}
+
+  .card-head{display:flex; align-items:flex-start; gap:8px}
+  .grip{
+    flex:none; margin:2px 0 0 -3px; padding:0;
+    background:none; border:none; border-radius:6px;
+    color:var(--muted); font-size:.95rem; line-height:1;
+    cursor:grab; opacity:0; transition:opacity .15s, color .15s;
+  }
+  .card:hover .grip, .grip:focus-visible{opacity:1}
+  .grip:hover{color:var(--ink)}
+  .grip:active{cursor:grabbing}
   .proj-title{
     flex:1; min-width:0; margin:0;
     font-family:var(--display); font-weight:700; font-size:1.2rem;
@@ -130,11 +141,11 @@
   }
   .task:hover{background:var(--surface-2)}
   .task.dragging{opacity:.35; cursor:grabbing; background:var(--surface-2)}
-  body.is-dragging .tasks{
+  body[data-drag="task"] .tasks{
     min-height:34px; border-radius:10px;
     outline:1.5px dashed var(--line); outline-offset:5px;
   }
-  body.is-dragging .task{cursor:grabbing}
+  body[data-drag] .task, body[data-drag] .grip{cursor:grabbing}
   .task.is-new{animation:pop .25s ease}
   @keyframes pop{from{opacity:0; transform:translateY(-4px)}}
 
@@ -293,6 +304,7 @@
       <div class="rail"><span class="rail-fill" style="height:${s.pct}%"></span></div>
       <div class="card-body">
         <div class="card-head">
+          <button type="button" class="grip" aria-label="Mover proyecto (arrastra, o usa las flechas)">⠿</button>
           <h2 class="proj-title" contenteditable="true" spellcheck="false" data-project="${p.id}">${esc(p.name)}</h2>
           <div class="head-meta">
             <span class="count">${s.done}/${s.total}</span>
@@ -387,7 +399,20 @@
   board.addEventListener('keydown', e => {
     if(e.target.classList.contains('proj-title') && e.key === 'Enter'){
       e.preventDefault(); e.target.blur();
+      return;
     }
+    // arrows on the grip: the keyboard way to reorder, since dragging needs a pointer
+    const grip = e.target.closest('.grip');
+    const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    if(!grip || !step) return;
+    e.preventDefault();
+    const id = grip.closest('.card').dataset.project;
+    const from = state.findIndex(p => p.id === id);
+    const to = from + step;
+    if(to < 0 || to >= state.length) return;
+    [state[from], state[to]] = [state[to], state[from]];
+    save(); render();
+    board.querySelector(`.card[data-project="${id}"] .grip`)?.focus();
   });
   board.addEventListener('focusout', e => {
     if(!e.target.classList.contains('proj-title')) return;
@@ -397,59 +422,107 @@
     p.name = name; save();
   });
 
-  // ---- drag & drop: reorder tasks, or move them between projects ----
+  // ---- drag & drop: reorder tasks and projects, and move tasks between projects ----
   // ponytail: native HTML5 DnD, no library. Mouse only — touch has no dragstart.
   let dragged = null;
+  let dragKind = null;
 
-  board.addEventListener('dragstart', e => {
-    const li = e.target.closest('.task');
-    if(!li) return;
-    dragged = li;
-    li.classList.add('dragging');
-    document.body.classList.add('is-dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', li.dataset.task); // Firefox needs payload
-  });
+  function startDrag(el, kind){
+    dragged = el;
+    dragKind = kind;
+    el.classList.add('dragging');
+    document.body.dataset.drag = kind;
+  }
 
-  board.addEventListener('dragover', e => {
-    if(!dragged) return;
-    const card = e.target.closest('.card[data-project]');
-    if(!card) return;
-    e.preventDefault();
-    const ul = card.querySelector('.tasks');
-    ul.insertBefore(dragged, dropTarget(ul, e.clientY));
-  });
+  function moveDrag(x, y){
+    if(dragKind === 'task'){
+      const card = document.elementFromPoint(x, y)?.closest('.card[data-project]');
+      if(!card) return;
+      const ul = card.querySelector('.tasks');
+      ul.insertBefore(dragged, taskBefore(ul, y));
+    }else{
+      board.insertBefore(dragged, cardBefore(x, y));
+    }
+  }
 
-  board.addEventListener('drop', e => { if(dragged) e.preventDefault(); });
-
-  board.addEventListener('dragend', () => {
+  function endDrag(){
     if(!dragged) return;
     dragged.classList.remove('dragging');
-    document.body.classList.remove('is-dragging');
+    delete document.body.dataset.drag;
     dragged = null;
+    dragKind = null;
+    dropGrips();
     commitOrder();
-  });
+  }
 
   // the first task whose midpoint sits below the cursor; null means "append"
-  function dropTarget(ul, y){
+  function taskBefore(ul, y){
     return [...ul.querySelectorAll('.task:not(.dragging)')]
       .find(el => { const b = el.getBoundingClientRect(); return y < b.top + b.height/2; }) || null;
   }
 
-  // rebuild every project's task list from the DOM, but only keep it if nothing was lost
+  // same idea across a grid: the first card the cursor sits above, or left of in its own row
+  function cardBefore(x, y){
+    return [...board.querySelectorAll('.card[data-project]')]
+      .filter(c => c !== dragged)
+      .find(c => {
+        const b = c.getBoundingClientRect();
+        return y < b.top || (y < b.bottom && x < b.left + b.width / 2);
+      }) || document.getElementById('new-project'); // the ghost card always sits last
+  }
+
+  // a card only becomes draggable while its grip is held, so tasks stay draggable on their own
+  function dropGrips(){
+    board.querySelectorAll('.card[draggable="true"]').forEach(c => { c.draggable = false; });
+  }
+
+  board.addEventListener('mousedown', e => {
+    const grip = e.target.closest('.grip');
+    if(grip) grip.closest('.card').draggable = true;
+  });
+  document.addEventListener('mouseup', dropGrips);
+
+  board.addEventListener('dragstart', e => {
+    const li = e.target.closest('.task');
+    const card = e.target.closest('.card[data-project]');
+    if(li) startDrag(li, 'task');
+    else if(card?.draggable) startDrag(card, 'card');
+    else { e.preventDefault(); return; }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', ''); // Firefox needs a payload
+  });
+
+  board.addEventListener('dragover', e => {
+    if(!dragged) return;
+    e.preventDefault();
+    moveDrag(e.clientX, e.clientY);
+  });
+
+  board.addEventListener('drop', e => { if(dragged) e.preventDefault(); });
+  board.addEventListener('dragend', endDrag);
+
+  // rebuild the whole board from the DOM, but only keep it if nothing went missing
   function commitOrder(){
-    const all = new Map();
-    state.forEach(p => p.tasks.forEach(t => all.set(t.id, t)));
-    const next = state.map(p => {
-      const ul = board.querySelector(`.card[data-project="${p.id}"] .tasks`);
-      return ul ? [...ul.children].map(li => all.get(li.dataset.task)).filter(Boolean) : p.tasks;
-    });
-    if(next.reduce((n, ts) => n + ts.length, 0) !== all.size){
-      console.error('drag: task count mismatch, discarding move');
+    const tasks = new Map();
+    state.forEach(p => p.tasks.forEach(t => tasks.set(t.id, t)));
+    const byId = new Map(state.map(p => [p.id, p]));
+
+    const next = [...board.querySelectorAll('.card[data-project]')]
+      .map(card => {
+        const p = byId.get(card.dataset.project);
+        if(!p) return null;
+        return { ...p, tasks: [...card.querySelector('.tasks').children]
+          .map(li => tasks.get(li.dataset.task)).filter(Boolean) };
+      })
+      .filter(Boolean);
+
+    const kept = next.reduce((n, p) => n + p.tasks.length, 0);
+    if(next.length !== state.length || kept !== tasks.size){
+      console.error('drag: board mismatch, discarding move');
       render();
       return;
     }
-    state.forEach((p, i) => { p.tasks = next[i]; });
+    state = next;
     save();
     state.forEach(updateMeta);
   }
